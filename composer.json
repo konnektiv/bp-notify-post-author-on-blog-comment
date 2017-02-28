@@ -1,0 +1,10 @@
+{
+  "name": "konnektiv/bp-notify-post-author-blog-comment",
+  "description": "Notify the Blog post author of any new comment on their blog post.",
+  "type": "wordpress-plugin",
+  "license": "GPL",
+  "require": {
+    "composer/installers": "~1.0",
+    "php": ">=5.2.4"
+  }
+}

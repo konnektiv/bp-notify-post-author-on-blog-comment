@@ -19,6 +19,9 @@ class DevB_Blog_Comment_Notifier {
 
 	private function __construct() {
 
+		add_action( 'bp_notification_settings', array( $this, 'screen_notification_settings' ) );
+		add_action( 'bp_core_install_emails', array( $this, 'install_bp_emails' ) );
+
 		add_action( 'bp_setup_globals', array( $this, 'setup_globals' ) );
 
 		//On New comment
@@ -33,6 +36,12 @@ class DevB_Blog_Comment_Notifier {
 		//should we do something on the action untrash_comment & unspam_comment
 
 		add_action( 'wp_set_comment_status', array( $this, 'comment_status_changed' ) );
+
+		// send email notifications
+		add_action( 'bp_blog_comment_notifier_new_notification', array( $this, 'send_comment_notification' ), 10, 3 );
+
+		// init
+		add_action( 'bp_init', array( $this, 'init' ) );
 
 		// Load plugin text domain
         add_action( 'bp_init', array( $this, 'load_textdomain' ) );
@@ -52,6 +61,26 @@ class DevB_Blog_Comment_Notifier {
 		return self::$instance;
 
 	}
+
+	/**
+     * Call plugin activiation functions if plugin got activated
+     *
+     * @hook action plugins_loaded
+     */
+    public function init() {
+		if ( get_option( '_bp_blog_comment_notifier_plugin_activated', false ) ) {
+			delete_option( '_bp_blog_comment_notifier_plugin_activated' );
+			$this->on_plugin_activation();
+		}
+	}
+
+	/**
+     * Plugin activiation hook
+     *
+     */
+    public function on_plugin_activation() {
+    	$this->install_bp_emails();
+    }
 
     /**
      * Load plugin text domain
@@ -80,7 +109,129 @@ class DevB_Blog_Comment_Notifier {
 
 		do_action( 'blog_comment_notifier_setup_globals' );
 	}
-	
+
+	/** SETTINGS ************************************************************/
+
+	/**
+	 * Adds user configurable notification settings for the component.
+	 *
+	 * @global $bp The global BuddyPress settings variable created in bp_core_setup_globals()
+	 */
+	function screen_notification_settings() {
+		if ( !$notify = bp_get_user_meta( bp_displayed_user_id(), 'notification_on_blog_comment', true ) )
+			$notify = 'yes';
+	?>
+
+		<table class="notification-settings" id="follow-notification-settings">
+			<thead>
+				<tr>
+					<th class="icon"></th>
+					<th class="title"><?php _e( 'Comments', 'bp-notify-post-author-on-blog-comment' ) ?></th>
+					<th class="yes"><?php _e( 'Yes', 'bp-notify-post-author-on-blog-comment' ) ?></th>
+					<th class="no"><?php _e( 'No', 'bp-notify-post-author-on-blog-comment' )?></th>
+				</tr>
+			</thead>
+
+			<tbody>
+				<tr>
+					<td></td>
+					<td><?php _e( 'A member commented on your post or comment', 'bp-notify-post-author-on-blog-comment' ) ?></td>
+					<td class="yes"><input type="radio" name="notifications[notification_on_blog_comment]" value="yes" <?php checked( $notify, 'yes', true ) ?>/></td>
+					<td class="no"><input type="radio" name="notifications[notification_on_blog_comment]" value="no" <?php checked( $notify, 'no', true ) ?>/></td>
+				</tr>
+			</tbody>
+
+			<?php do_action( 'bp_notify_post_author_on_blog_comment_screen_notification_settings' ); ?>
+		</table>
+	<?php
+	}
+
+	/**
+	 * Get a list of emails
+	 *t
+	 * @since 1.0.0
+	 *
+	 * @return array
+	 */
+	function get_email_schema() {
+		return array(
+			'bp-blog-notifier-post-commented' => array(
+				/* translators: do not remove {} brackets or translate its contents. */
+				'post_title'   => __( '[{{{site.name}}}] {{poster.name}} commented on your {{post.post_type}}', 'bp-notify-post-author-on-blog-comment' ),
+				/* translators: do not remove {} brackets or translate its contents. */
+				'post_content' => __( "{{poster.name}} commented on your {{post.post_type}} with the title :\n\n<blockquote>&quot;{{post.title}}&quot;</blockquote>\n\nComment:\n\n<blockquote>&quot;{{comment.content}}&quot;</blockquote>\n\n<a href=\"{{{comment.url}}}\">View the comment</a>.", 'bp-notify-post-author-on-blog-comment' ),
+				/* translators: do not remove {} brackets or translate its contents. */
+				'post_excerpt' => __( "{{poster.name}} commented on your {{post.post_type}} with the title :\n\n\"{{post.title}}\"\n\nComment:\n\n\"{{comment.content}}\"\n\nView the comment: {{{comment.url}}}", 'bp-notify-post-author-on-blog-comment' ),
+			),
+			'bp-blog-notifier-comment-replied' => array(
+				/* translators: do not remove {} brackets or translate its contents. */
+				'post_title'   => __( '[{{{site.name}}}] {{poster.name}} replied to your comment', 'bp-notify-post-author-on-blog-comment' ),
+				/* translators: do not remove {} brackets or translate its contents. */
+				'post_content' => __( "{{poster.name}} replied to your comment on the {{post.post_type}} with the title :\n\n<blockquote>&quot;{{post.title}}&quot;</blockquote>\n\nComment:\n\n<blockquote>&quot;{{comment.content}}&quot;</blockquote>\n\n<a href=\"{{{comment.url}}}\">View the reply</a>.", 'bp-notify-post-author-on-blog-comment' ),
+				/* translators: do not remove {} brackets or translate its contents. */
+				'post_excerpt' => __( "{{poster.name}} replied to your comment on the {{post.post_type}} with the title :\n\n\"{{post.title}}\"\n\nComment:\n\n\"{{comment.content}}\"\n\nView the comment: {{{comment.url}}}", 'bp-notify-post-author-on-blog-comment' ),
+			),
+		);
+	}
+
+	/**
+	 * Get a list of email type taxonomy terms.
+	 *
+	 * @since 1.0.0
+	 *
+	 * @return array
+	 */
+	function get_email_type_schema() {
+		return array(
+			'bp-blog-notifier-post-commented'    => __( 'A Post the recipient created has been commented.', 'bp-notify-post-author-on-blog-comment' ),
+			'bp-blog-notifier-comment-replied'    => __( 'A Comment by the recipient has been replied.', 'bp-notify-post-author-on-blog-comment' ),
+		);
+	}
+
+	/**
+	 * Installs BuddyPress Emails
+	 *
+	 * @package BuddyPress Followers Notifications
+	 * @since 1.0.0
+	 */
+	function install_bp_emails() {
+
+		$emails = $this->get_email_schema();
+		$terms  = $this->get_email_type_schema();
+
+		foreach ( $emails as $term_name => $email ) {
+
+		    // Do not create if it already exists and is not in the trash
+		    $post_exists = get_page_by_title( $email['post_title'], OBJECT, bp_get_email_post_type() );
+
+		    if ( $post_exists && $post_exists->ID != 0 && get_post_status( $post_exists ) == 'publish' )
+		       continue;
+
+		    // Create post object
+		    $email_post = array(
+		      'post_title'    => $email['post_title'],
+		      'post_content'  => $email['post_content'],  // HTML email content.
+		      'post_excerpt'  => $email['post_excerpt'],  // Plain text email content.
+		      'post_status'   => 'publish',
+		      'post_type' 	  => bp_get_email_post_type() // this is the post type for emails
+		    );
+
+		    // Insert the email post into the database
+		    $post_id = wp_insert_post( $email_post );
+
+		    if ( $post_id ) {
+		      // add our email to the right taxonomy term
+
+		        $tt_ids = wp_set_object_terms( $post_id, $term_name, bp_get_email_tax_type() );
+		        foreach ( $tt_ids as $tt_id ) {
+		            $term = get_term_by( 'term_taxonomy_id', (int) $tt_id, bp_get_email_tax_type() );
+		            wp_update_term( (int) $term->term_id, bp_get_email_tax_type(), array(
+		                'description' => $terms[$term_name],
+		            ) );
+		        }
+		    }
+		}
+	}
 
 	/**
 	 * Notify when  a comment is posted
@@ -393,8 +544,62 @@ class DevB_Blog_Comment_Notifier {
 		}
 
 		$this->mark_notified( $comment_id );
-		
-		
+
+		do_action( 'bp_blog_comment_notifier_new_notification', $user_id, $comment_id, $comment );
+	}
+
+	/**
+	 * Send email when a new post is commented
+	 *
+	 * @since 1.0.0
+	 *
+	 */
+	function send_comment_notification( $user_id, $comment_ID, $comment = null ) {
+
+		if ( ! $comment )
+			$comment = get_comment( $comment_ID );
+
+		$post = get_post( $comment->comment_post_ID );
+
+		$post_type = get_post_type_object( $post->post_type );
+
+		// If this user does not want email notifications, bail
+		if ( 'no' == bp_get_user_meta( $user_id, 'notification_on_blog_comment', true ) )
+			return;
+
+		$is_reply = ( $comment->comment_parent &&
+			( $parent_comment = get_comment( $comment->comment_parent ) ) &&
+			$user_id == $parent_comment->user_id );
+
+		$email_type   = $is_reply?'bp-blog-notifier-comment-replied':'bp-blog-notifier-post-commented';
+		$poster_name  = $comment->user_id?bp_core_get_user_displayname( $comment->user_id ):$comment->comment_author;
+		$comment_link = get_comment_link( $comment_ID );
+
+		// Now email the user with the message
+		$email_args = array(
+			'tokens' => array(
+				'poster.name'      => $poster_name,
+				'post.title'       => $post->post_title,
+				'post.post_type'   => $post_type->labels->singular_name,
+				'comment.url'      => $comment_link,
+				'comment.content'  => $comment->comment_content
+			),
+		);
+
+		$ret = bp_send_email( $email_type, (int)$user_id, $email_args );
+
+		if ( is_wp_error( $ret ) ) {
+			error_log("Sending of Mail failed: " . $ret->get_error_message() );
+		}
+
+		/**
+		 * Fires after the sending of a bp blog comment email notification.
+		 *
+		 * @since 1.0.0
+		 *
+		 * @param WP_Post $post        Post object.
+		 */
+		do_action( 'bp_blog_comment_notifier_sent_email', $post, $comment );
 	}
 
 	public function mark_read() {
@@ -427,3 +632,14 @@ class DevB_Blog_Comment_Notifier {
 }
 //initialize
 DevB_Blog_Comment_Notifier::get_instance();
+
+/**
+ * Sets a flag if the plugin has just been activated
+ *
+ * @since 1.0.0
+ */
+function bp_blog_comment_notifier_activation_hook() {
+
+	update_option( '_bp_blog_comment_notifier_plugin_activated', true );
+}
+register_activation_hook( __FILE__, 'bp_blog_comment_notifier_activation_hook' );

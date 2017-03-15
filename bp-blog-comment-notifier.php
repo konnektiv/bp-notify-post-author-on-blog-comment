@@ -316,9 +316,9 @@ class DevB_Blog_Comment_Notifier {
 		}
 
 		if ( $format == 'string' ) {
-		
-		 return apply_filters( 'bp_blog_notieifier_new_comment_notification_string', '<a href="' . $link . '">' . $text . '</a>' );
-		
+
+		 return apply_filters( 'bp_blog_notifier_new_comment_notification_string', '<a href="' . $link . '">' . $text . '</a>' );
+
 		}else{
 
         return array(
